@@ -1,0 +1,5 @@
+# ninja log v6
+1675	1781	7911911884079203	automaton.exe	8692631f9f40a9ca
+5	1675	7911911867379962	CMakeFiles/automaton.dir/src/main.cpp.obj	dd5ac8b3fcf5f5ed
+690	754	7911846556953760	libglad.a	7b21a338a27d1045
+3	687	7911846550078075	CMakeFiles/glad.dir/C_/Dev/CppDep/glad/src/glad.c.obj	1bfeff14bc927c13
