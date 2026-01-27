@@ -1,4 +1,0 @@
-C:/Users/tomek/Downloads/School Work/Y4-Q2/ME302/automaton/build/debug/CMakeFiles/glad.dir
-C:/Users/tomek/Downloads/School Work/Y4-Q2/ME302/automaton/build/debug/CMakeFiles/automaton.dir
-C:/Users/tomek/Downloads/School Work/Y4-Q2/ME302/automaton/build/debug/CMakeFiles/edit_cache.dir
-C:/Users/tomek/Downloads/School Work/Y4-Q2/ME302/automaton/build/debug/CMakeFiles/rebuild_cache.dir
