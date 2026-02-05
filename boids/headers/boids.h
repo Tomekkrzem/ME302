@@ -36,7 +36,7 @@ struct BoidParams
     float neighborRadius = 4.0f;
     float separationRadius = 6.0f;
 
-    float wSep = 40.2f;
+    float wSep = 20.2f;
     float wAlign = 0.9f;
     float wCoh = 0.3f;
 
@@ -44,18 +44,16 @@ struct BoidParams
     float boundsMargin = 2.5f;
     float lookAhead = 1.2f;
 
-    float wOrbit = 1.6f;
+    float wOrbit = 1.2f;
     float wTarget = 0.6f;
-    float arriveRadius = 4.0f;
-    float targetMinDist = 2.5f;
+    float arriveRadius = 1.0f;
+    float targetMinDist = 1.5f;
 };
 
 // Model-space directions and corrections for orienting the mesh
 static constexpr glm::vec3 MODEL_NOSE(0.0f, 1.0f, 0.0f);
 static constexpr glm::vec3 MODEL_UP  (0.0f, 0.0f, 1.0f);
 static constexpr glm::vec3 WORLD_UP  (0.0f, 0.0f, 1.0f);
-static const glm::quat MODEL_CORRECTION = glm::angleAxis(glm::pi<float>(), glm::vec3(0,1,0)) *
-    glm::angleAxis(-glm::half_pi<float>(), glm::vec3(1,0,0));
 
 // ------------------------------- HELPERS ---------------------------------
 

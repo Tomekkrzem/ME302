@@ -107,7 +107,7 @@ int main()
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // Create window + context
-    GLFWwindow* win = glfwCreateWindow(1280, 720, "Boids + Menu", nullptr, nullptr);
+    GLFWwindow* win = glfwCreateWindow(1280, 720, "Boids", nullptr, nullptr);
     if (!win)
     {
         std::cerr << "Failed to create window\n";
@@ -160,8 +160,8 @@ int main()
 
     // Boid setup + bounds
     const int BOID_COUNT = 500;
-    glm::vec3 boundsMin(-15.0f, -15.0f, -15.0f);
-    glm::vec3 boundsMax( 15.0f,  15.0f,  15.0f);
+    glm::vec3 boundsMin(-25.0f, -25.0f, -25.0f);
+    glm::vec3 boundsMax( 25.0f,  25.0f,  25.0f);
 
     // RNG for initial positions/directions
     std::mt19937 rng(1337u);
@@ -250,10 +250,10 @@ int main()
 
         // Moving target to steer boids toward
         float t = (float)glfwGetTime();
-        float a = 10.0f;
+        float a = 50.0f;
         float s = std::sin(t * 0.35f);
         float c = std::cos(t * 0.35f);
-        glm::vec3 targetPos(a*s, 2.0f*std::sin(t*0.20f), a*s*c);
+        glm::vec3 targetPos( a*std::sin(t*1.5f), a*std::sin(t*1.5f), a*std::sin(t*1.5f));
 
         // Update flock simulation
         updateBoids(boids, params, dt, boundsMin, boundsMax, targetPos);
@@ -326,6 +326,10 @@ int main()
 
             menuText.drawCentered("Click Start to Begin",
                 (float)w * 0.5f, (float)h * 0.20f, 0.25f,
+                {0.85f, 0.92f, 0.95f});
+            
+            menuText.drawCentered("Tomasz Krzeminski",
+                (float)w * 0.5f, (float)h * 0.10f, 0.25f,
                 {0.85f, 0.92f, 0.95f});
 
             // Restore depth writes
