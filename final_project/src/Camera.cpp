@@ -1,39 +1,64 @@
 #include "Camera.h"
 #include <glm/gtc/matrix_transform.hpp>
+#include <algorithm>
 #include <cmath>
 
-// --------------------- Camera Global Definitions ---------------------
-glm::vec3 gCameraPos   = glm::vec3(0.0f, 2.0f, 6.0f);
-glm::vec3 gCameraFront = glm::vec3(0.0f, -0.3f, -1.0f);
-glm::vec3 gCameraUp    = glm::vec3(0.0f, 1.0f,  0.0f);
-float gCameraSpeed     = 0.01f;
-float gYaw             = -90.0f;
-float gPitch           = 0.0f;
-float gLastMouseX      = 640.0f;   // Half of default screen width
-float gLastMouseY      = 480.0f;   // Half of default screen height
-bool  gFirstMouse      = true;
+glm::vec3 gCameraTarget   = glm::vec3(0.0f, 0.0f, 0.0f);
+glm::vec3 gCameraUp       = glm::vec3(0.0f, 1.0f, 0.0f);
+float gCameraYaw          = -90.0f;
+float gCameraPitch        = 30.0f;
+float gCameraDistance     = 28.0f;
 
-// --------------------- Camera Functions ---------------------
-void MouseLook(float xOffset, float yOffset) {
-    float sensitivity = 0.1f;
-    xOffset *= sensitivity;
-    yOffset *= sensitivity;
+glm::vec3 gCameraPos      = glm::vec3(0.0f);
+glm::vec3 gCameraFront    = glm::vec3(0.0f, 0.0f, -1.0f);
 
-    gYaw   += xOffset;
-    gPitch -= yOffset;
+static float ClampPitch(float pitch) {
+    return std::clamp(pitch, -89.0f, 89.0f);
+}
 
-    // Clamp pitch so camera doesn't flip
-    if (gPitch >  89.0f) gPitch =  89.0f;
-    if (gPitch < -89.0f) gPitch = -89.0f;
+static float ClampDistance(float dist) {
+    return std::clamp(dist, 1.0f, 300.0f);
+}
 
-    // Recalculate front vector from yaw and pitch
-    glm::vec3 front;
-    front.x = cos(glm::radians(gYaw)) * cos(glm::radians(gPitch));
-    front.y = sin(glm::radians(gPitch));
-    front.z = sin(glm::radians(gYaw)) * cos(glm::radians(gPitch));
-    gCameraFront = glm::normalize(front);
+void UpdateOrbitCamera() {
+    gCameraPitch = ClampPitch(gCameraPitch);
+    gCameraDistance = ClampDistance(gCameraDistance);
+
+    float yawRad   = glm::radians(gCameraYaw);
+    float pitchRad = glm::radians(gCameraPitch);
+
+    glm::vec3 offset;
+    offset.x = gCameraDistance * cos(pitchRad) * cos(yawRad);
+    offset.y = gCameraDistance * sin(pitchRad);
+    offset.z = gCameraDistance * cos(pitchRad) * sin(yawRad);
+
+    gCameraPos = gCameraTarget + offset;
+    gCameraFront = glm::normalize(gCameraTarget - gCameraPos);
+}
+
+void OrbitCamera(float deltaX, float deltaY) {
+    float rotateSpeed = 0.25f;
+    gCameraYaw   -= deltaX * rotateSpeed;
+    gCameraPitch += deltaY * rotateSpeed;
+    UpdateOrbitCamera();
+}
+
+void PanCamera(float deltaX, float deltaY) {
+    glm::vec3 right = glm::normalize(glm::cross(gCameraFront, gCameraUp));
+    glm::vec3 up    = glm::normalize(glm::cross(right, gCameraFront));
+
+    float panSpeed = 0.001f * gCameraDistance;
+
+    gCameraTarget += (-right * deltaX + up * deltaY) * panSpeed;
+    UpdateOrbitCamera();
+}
+
+void ZoomCamera(float delta) {
+    float zoomSpeed = 1.5f;
+    gCameraDistance -= delta * zoomSpeed;
+    UpdateOrbitCamera();
 }
 
 glm::mat4 GetViewMatrix() {
-    return glm::lookAt(gCameraPos, gCameraPos + gCameraFront, gCameraUp);
+    return glm::lookAt(gCameraPos, gCameraTarget, gCameraUp);
 }

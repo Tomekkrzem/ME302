@@ -33,56 +33,44 @@ void UpdatePhysics(RigidBody& body, float dt) {
 }
 
 void ResolveGroundCollision(RigidBody& body) {
-    
-    float groundLevel = GROUND_Y + body.radius;
+    float groundContact = body.radius - GROUND_SLOP;
 
-    if (body.position.y <= groundLevel) {
-        body.position.y = groundLevel;
-
-        if (glm::abs(body.velocity.y) < 0.1f) {
+    if (body.position.y <= groundContact) {
+        body.position.y  = groundContact;
+        if (body.velocity.y < 0.0f)
             body.velocity.y = 0.0f;
-            body.Grounded = true;
-        } else {
-            body.velocity.y *= -RESTITUTION;
-            body.Grounded = false;
-        }
-
+        body.Grounded = true;
     } else {
-
         body.Grounded = false;
-    
     }
-
 }
 
 void ResolveSphereCollision(RigidBody& a, RigidBody& b) {
+    glm::vec3 delta    = a.position - b.position;
+    float     distance = glm::length(delta);
+    float     minDist  = a.radius + b.radius;
 
-    glm::vec3 delta = a.position - b.position;
+    if (distance >= minDist || distance <= 0.0f) return;
 
-    float distance = glm::length(delta);
-    float minDist = a.radius + b.radius;
+    const float RESTITUTION = 0.2f;
 
-    if (distance < minDist && distance > 0.0f) {
+    glm::vec3 normal    = glm::normalize(delta);
+    float     overlap   = minDist - distance;
+    float     totalMass = a.mass + b.mass;
 
-        glm::vec3 normal = glm::normalize(delta);
+    // Push apart based on mass ratio
+    a.position += normal * overlap * (b.mass / totalMass);
+    b.position -= normal * overlap * (a.mass / totalMass);
 
-        float overlap = minDist - distance;
-        float totalMass = a.mass + b.mass;
+    // Only resolve if moving toward each other
+    float relativeVel = glm::dot(a.velocity - b.velocity, normal);
+    if (relativeVel >= 0.0f) return;
 
-        a.position += normal * overlap * (b.mass / totalMass);
-        b.position -= normal * overlap * (a.mass / totalMass);
+    float impulse = -(1.0f + RESTITUTION) * relativeVel / (1.0f/a.mass + 1.0f/b.mass);
 
-        float aVel = glm::dot(a.velocity, normal);
-        float bVel = glm::dot(b.velocity, normal);
-
-        float aNewVel = (aVel * (a.mass - b.mass) + 2.0f * b.mass * bVel) / totalMass;
-        float bNewVel = (bVel * (b.mass - a.mass) + 2.0f * a.mass * aVel) / totalMass;
-
-        a.velocity += (aNewVel - aVel) * normal;
-        b.velocity -= (bNewVel - bVel) * normal;
-
-    }
-
+    glm::vec3 impulseVec = impulse * normal;
+    a.velocity += impulseVec / a.mass;   // a gets pushed along normal
+    b.velocity -= impulseVec / b.mass;   // b gets pushed opposite normal
 }
 
 

@@ -4,9 +4,6 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
-#include "imgui.h"
-#include "imgui_impl_sdl3.h"
-#include "imgui_impl_opengl3.h"
 
 // C++ Standard Template Library (STL)
 #include <iostream>
@@ -21,28 +18,32 @@
 #include "Shader.h"
 #include "Lighting.h"
 #include "Physics.h"
+#include "AI.h"
+#include "UI.h"
 
 // --------------------- Globals ---------------------
 
 // Screen Dimensions
-int gScreenHeight = 960;
-int gScreenWidth  = 1280;
+int gScreenHeight = 1080;
+int gScreenWidth  = 1920;
 SDL_Window*   gGraphisApplicationWindow = nullptr;
 SDL_GLContext gOpenGLContext = nullptr;
 
 // Main Loop Flag
 bool gQuit = false;
 
+// Plane Globals
 GLuint gPlaneVAO, gPlaneVBO, gPlaneEBO;
 
-// Object Object
+// Object
 Mesh      gObjectMesh;
-float     gObjectRotation    = 0.0f;
+float     gObjectRotation     = 0.0f;
 glm::vec3 gObjectCenterOffset = glm::vec3(0.0f);
-float gObjectBottomOffset = 0;
-const float gObjectScale     = 0.15f;
+float     gObjectBottomOffset = 0.0f;
+float gObjectScale      = 0.15f;
 
-int gSelectedBlob = -1;
+// Food
+Mesh gFoodMesh;
 
 // Shadow Map
 GLuint    gShadowMapFBO     = 0;
@@ -54,74 +55,44 @@ const int SHADOW_HEIGHT     = 2048;
 float gLastTime  = 0.0f;
 float gDeltaTime = 0.0f;
 
+// Blob Globals
+std::vector<BlobInstance> gBlobs;
+const int   BLOB_COUNT         = 400;
+int         gSelectedBlob      = -1;
+const float SCREEN_PICK_RADIUS = 50.0f; // pixels
+
+// View and Projection Globals
+glm::mat4 gView = glm::mat4(1.0f);
+glm::mat4 gProj = glm::mat4(1.0f);
+
+// Simulation Time Scale
+float gTimeScale = 1.0f;
+
+// Title Screen Condition
+bool gShowTitleScreen = true;
+
+// Debug Mode Condition
+bool gDebugMode = false;
+
+// Mouse Conditions for Pan and Drag
+bool gMiddleMouseHeld = false;
+bool gCtrlMiddleMouseHeld = false;
+
+// Follow Blob
+bool gFollowSelectedBlob = false;
+
+float gP_Size = 50.0f;
+
 // --------------------- Geometry Data ---------------------
 
 const std::vector<GLfloat> planeVertexData {
 //   X       Y      Z      NX    NY    NZ    U     V
-    -20.0f, 0.0f, -20.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-     20.0f, 0.0f, -20.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
-     20.0f, 0.0f,  20.0f, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
-    -20.0f, 0.0f,  20.0f, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
+    -gP_Size, 0.0f, -gP_Size, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+     gP_Size, 0.0f, -gP_Size, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f,
+     gP_Size, 0.0f,  gP_Size, 0.0f, 1.0f, 0.0f, 1.0f, 1.0f,
+    -gP_Size, 0.0f,  gP_Size, 0.0f, 1.0f, 0.0f, 0.0f, 1.0f,
 };
 const std::vector<GLuint> planeIndices { 0,1,2, 2,3,0 };
-
-// --------------------- Genetic Information ---------------------
-
-struct Genome {
-    float size;          // 0.0 - 1.0
-    float speed;         // 0.0 - 1.0
-    float sightRange;    // 0.0 - 1.0
-    float energyEff;     // 0.0 - 1.0  (higher = more efficient)
-};
-
-struct Phenotype {
-    float worldScale;    // actual size in world space
-    float moveForce;     // actual force applied when moving
-    float sightDist;     // actual sight distance
-    float maxEnergy;     // energy pool
-    float energyCost;    // energy drained per second while moving
-    glm::vec3 color;     // visual color derived from traits
-};
-
-Phenotype MakePhenotype(const Genome& g, float baseScale, float baseRadius) {
-    Phenotype p;
-
-    // Size and speed are inversely linked — bigger = slower
-    p.worldScale  = baseScale * (0.5f + g.size * 1.5f);       // 0.5x to 2x base size
-    p.moveForce   = 1.0f + g.speed * 4.0f;                    // 1 to 5
-    p.sightDist   = 2.0f + g.sightRange * 18.0f;              // 2 to 20 units
-    p.maxEnergy   = 50.0f + g.energyEff * 150.0f;             // 50 to 200
-    p.energyCost  = (g.speed * 2.0f) / (g.energyEff + 0.1f);  // fast + inefficient = hungry
-
-    // Color: red channel driven by size, blue by speed, green stays low
-    p.color = glm::vec3(
-        0.2f + g.size  * 0.8f,   // red   0.2 -> 1.0
-        0.1f,                     // green fixed low
-        0.2f + g.speed * 0.8f    // blue  0.2 -> 1.0
-    );
-
-    return p;
-}
-
-// --------------------- Blobs ---------------------
-
-struct BlobInstance {
-    Genome    genome;
-    Phenotype phenotype;
-    RigidBody body;
-    glm::mat4 modelMatrix = glm::mat4(1.0f);
-    glm::vec3 wanderDir   = glm::vec3(0.0f);
-    float     wanderTimer = 0.0f;
-    float     energy      = 100.0f;
-    bool      alive       = true;
-
-    // Constructor to initialize RigidBody which has no default constructor
-    BlobInstance(Genome g, Phenotype p, glm::vec3 startPos, float mass, float radius)
-        : genome(g), phenotype(p), body(startPos, mass, radius), energy(p.maxEnergy) {}
-};
-
-std::vector<BlobInstance> gBlobs;
-const int BLOB_COUNT = 50;
 
 // --------------------- Helper Functions ---------------------
 
@@ -189,43 +160,10 @@ void SetupShadowMap() {
     glDrawBuffer(GL_NONE);
     glReadBuffer(GL_NONE);
 
-    // Verify FBO is complete
-    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         std::cout << "ERROR: Shadow map framebuffer is not complete!" << std::endl;
-    }
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
-}
-
-Genome RandomGenome() {
-    auto rf = []() { return (rand() % 100) / 100.0f; };
-    return { rf(), rf(), rf(), rf() };
-}
-
-bool RayIntersectsSphere(glm::vec3 rayOrigin, glm::vec3 rayDir,
-                          glm::vec3 sphereCenter, float radius) {
-    glm::vec3 oc = rayOrigin - sphereCenter;
-    float b = glm::dot(oc, rayDir);
-    float c = glm::dot(oc, oc) - radius * radius;
-    return (b * b - c) >= 0.0f;
-}
-
-glm::vec3 ScreenToRay(int mouseX, int mouseY) {
-    // Normalize to NDC
-    float x = (2.0f * mouseX) / gScreenWidth  - 1.0f;
-    float y = 1.0f - (2.0f * mouseY) / gScreenHeight;
-
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f),
-                                      (float)gScreenWidth / gScreenHeight,
-                                      0.1f, 100.0f);
-    glm::mat4 view = GetViewMatrix();
-
-    glm::vec4 rayClip  = glm::vec4(x, y, -1.0f, 1.0f);
-    glm::vec4 rayEye   = glm::inverse(proj) * rayClip;
-    rayEye = glm::vec4(rayEye.x, rayEye.y, -1.0f, 0.0f);
-
-    glm::vec3 rayWorld = glm::vec3(glm::inverse(view) * rayEye);
-    return glm::normalize(rayWorld);
 }
 
 // --------------------- Core Functions ---------------------
@@ -236,6 +174,9 @@ void VertexSpecification() {
     gObjectMesh.Load("models/Blob.obj");
     gObjectMesh.Setup();
 
+    gFoodMesh.Load("models/Food.obj");
+    gFoodMesh.Setup();
+
     float     meshRadius  = gObjectMesh.GetBoundingRadius();
     float     worldRadius = meshRadius * gObjectScale;
     glm::vec3 center      = gObjectMesh.GetCenter();
@@ -243,15 +184,14 @@ void VertexSpecification() {
     gObjectCenterOffset = center * gObjectScale;
 
     float meshBottom = FLT_MAX;
-    for (const auto& v : gObjectMesh.vertices) {
+    for (const auto& v : gObjectMesh.vertices)
         meshBottom = std::min(meshBottom, v.y);
-    }
-    gObjectBottomOffset = meshBottom; // ← raw, unscaled
+    gObjectBottomOffset = meshBottom; // raw, unscaled
 
     srand(42);
     for (int i = 0; i < BLOB_COUNT; i++) {
-        float x = ((rand() % 200) - 100) * 0.1f;
-        float z = ((rand() % 200) - 100) * 0.1f;
+        float x = ((rand() % int(gP_Size * 20)) - gP_Size * 10) * 0.1f;
+        float z = ((rand() % int(gP_Size * 20)) - gP_Size * 10) * 0.1f;
         float y = 5.0f + (rand() % 100) * 0.1f;
 
         Genome    g = RandomGenome();
@@ -261,11 +201,12 @@ void VertexSpecification() {
         gBlobs.emplace_back(g, p, glm::vec3(x, y, z), 1.0f, scaledRadius);
     }
 
+    SpawnFood(gP_Size);
+
     SetupShadowMap();
 }
 
 void InitializeProgram() {
-
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         std::cout << "SDL3 could not initialize video subsystem" << std::endl;
         exit(1);
@@ -277,17 +218,21 @@ void InitializeProgram() {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-    gGraphisApplicationWindow = SDL_CreateWindow("Final Project",
-                                                  gScreenWidth, gScreenHeight,
-                                                  SDL_WINDOW_OPENGL);
-    if (gGraphisApplicationWindow == nullptr) {
+    gGraphisApplicationWindow = SDL_CreateWindow(
+        "Evolution Simulator",
+        gScreenWidth,
+        gScreenHeight,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+    );
+
+    if (!gGraphisApplicationWindow) {
         std::cout << "SDL_Window was not able to be created! SDL Error: "
                   << SDL_GetError() << std::endl;
         exit(1);
     }
 
     gOpenGLContext = SDL_GL_CreateContext(gGraphisApplicationWindow);
-    if (gOpenGLContext == nullptr) {
+    if (!gOpenGLContext) {
         std::cout << "OpenGL context could not be created! SDL Error: "
                   << SDL_GetError() << std::endl;
         exit(1);
@@ -302,12 +247,14 @@ void InitializeProgram() {
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
     ImGui::StyleColorsDark();
     ImGui_ImplSDL3_InitForOpenGL(gGraphisApplicationWindow, gOpenGLContext);
     ImGui_ImplOpenGL3_Init("#version 410");
 
-    SDL_SetWindowRelativeMouseMode(gGraphisApplicationWindow, true);
+    SDL_SetWindowRelativeMouseMode(gGraphisApplicationWindow, false);
+    SDL_ShowCursor();
+
+    UpdateOrbitCamera();
 }
 
 void Input() {
@@ -315,106 +262,128 @@ void Input() {
     while (SDL_PollEvent(&e) != 0) {
 
         ImGui_ImplSDL3_ProcessEvent(&e);
-
+        
         if (e.type == SDL_EVENT_QUIT) {
             std::cout << "Goodbye!" << std::endl;
             gQuit = true;
         }
-        if (e.type == SDL_EVENT_MOUSE_MOTION) {
-            MouseLook((float)e.motion.xrel, (float)e.motion.yrel);
+
+        if (e.type == SDL_EVENT_WINDOW_RESIZED) {
+            gScreenWidth  = e.window.data1;
+            gScreenHeight = e.window.data2;
+
+            glViewport(0, 0, gScreenWidth, gScreenHeight);
         }
 
-        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT) {
-            SDL_SetWindowRelativeMouseMode(gGraphisApplicationWindow, false);
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            e.button.button == SDL_BUTTON_MIDDLE) {
+            gMiddleMouseHeld = true;
+        }
 
-            float mouseX, mouseY;
-            SDL_GetMouseState(&mouseX, &mouseY);
+        if (e.type == SDL_EVENT_MOUSE_BUTTON_UP &&
+            e.button.button == SDL_BUTTON_MIDDLE) {
+            gMiddleMouseHeld = false;
+        }
 
-            SDL_SetWindowRelativeMouseMode(gGraphisApplicationWindow, true);
+        if (e.type == SDL_EVENT_MOUSE_MOTION &&
+            gMiddleMouseHeld &&
+            !gShowTitleScreen &&
+            !ImGui::GetIO().WantCaptureMouse) {
 
-            glm::vec3 rayOrigin = gCameraPos;
-            glm::vec3 rayDir    = ScreenToRay((int)mouseX, (int)mouseY);
+            const bool* keys = SDL_GetKeyboardState(NULL);
+            bool ctrlHeld = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
 
-            gSelectedBlob = -1; // deselect
-            float closestDist = FLT_MAX;
+            if (ctrlHeld) {
+                // Ctrl + MMB = pan
+                PanCamera((float)e.motion.xrel, (float)e.motion.yrel);
+            } else {
+                // MMB = orbit
+                OrbitCamera(-(float)e.motion.xrel, (float)e.motion.yrel);
+            }
+        }
+
+        if (e.type == SDL_EVENT_MOUSE_WHEEL &&
+            !gShowTitleScreen &&
+            !ImGui::GetIO().WantCaptureMouse) {
+            ZoomCamera((float)e.wheel.y);
+        }
+
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_D) {
+            gDebugMode = !gDebugMode;
+        }
+
+        if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F) {
+            if (gSelectedBlob != -1 && gBlobs[gSelectedBlob].alive) {
+                gFollowSelectedBlob = !gFollowSelectedBlob;
+            }
+        }
+
+        if (!gShowTitleScreen &&
+            e.type == SDL_EVENT_MOUSE_BUTTON_DOWN &&
+            e.button.button == SDL_BUTTON_LEFT &&
+            !ImGui::GetIO().WantCaptureMouse) {
+
+            int mouseX = e.button.x;
+            int mouseY = e.button.y;
+
+            gSelectedBlob = -1;
+            float closestScreenDist = FLT_MAX;
 
             for (int i = 0; i < (int)gBlobs.size(); i++) {
                 if (!gBlobs[i].alive) continue;
 
-                glm::vec3 blobPos = gBlobs[i].body.position;
-                float pickRadius = gBlobs[i].body.radius * 2.5f; // generous pick radius
+                glm::vec3 visualPos = gBlobs[i].body.position;
 
-                glm::vec3 oc = rayOrigin - blobPos;
-                float b = glm::dot(oc, rayDir);
-                float c = glm::dot(oc, oc) - pickRadius * pickRadius;
-                float discriminant = b * b - c;
+                glm::vec4 clip = gProj * gView * glm::vec4(visualPos, 1.0f);
+                if (clip.w <= 0.0f) continue;
 
-                if (discriminant >= 0.0f) {
-                    float dist = -b - sqrt(discriminant);
-                    if (dist < closestDist) {
-                        closestDist   = dist;
-                        gSelectedBlob = i;
-                    }
+                glm::vec3 ndc = glm::vec3(clip) / clip.w;
+                float screenX = (ndc.x + 1.0f) * 0.5f * gScreenWidth;
+                float screenY = (1.0f - ndc.y) * 0.5f * gScreenHeight;
+
+                float dx = screenX - mouseX;
+                float dy = screenY - mouseY;
+                float screenDist = sqrt(dx * dx + dy * dy);
+
+                if (screenDist < SCREEN_PICK_RADIUS && screenDist < closestScreenDist) {
+                    closestScreenDist = screenDist;
+                    gSelectedBlob = i;
                 }
             }
-        }
 
+            if (gSelectedBlob != -1) {
+                gCameraTarget = gBlobs[gSelectedBlob].body.position;
+                UpdateOrbitCamera();
+            }
+        }
     }
+
+    if (gShowTitleScreen) return;
 
     const bool* keys = SDL_GetKeyboardState(NULL);
-    glm::vec3 right  = glm::normalize(glm::cross(gCameraFront, gCameraUp));
-
-    if (keys[SDL_SCANCODE_W]) gCameraPos += gCameraSpeed * gCameraFront;
-    if (keys[SDL_SCANCODE_S]) gCameraPos -= gCameraSpeed * gCameraFront;
-    if (keys[SDL_SCANCODE_A]) gCameraPos -= gCameraSpeed * right;
-    if (keys[SDL_SCANCODE_D]) gCameraPos += gCameraSpeed * right;
-
-    if (keys[SDL_SCANCODE_SPACE])  gCameraPos += gCameraSpeed * gCameraUp;
-    if (keys[SDL_SCANCODE_LSHIFT]) gCameraPos -= gCameraSpeed * gCameraUp;
-
-    if (keys[SDL_SCANCODE_LCTRL]) {
-        gCameraSpeed = 0.1f;
-    } else {
-        gCameraSpeed = 0.01f;
-    }
-
-    // Physics interactions
-    if (keys[SDL_SCANCODE_F]) {
-        for (auto& blob : gBlobs)
-            ApplyForce(blob.body, glm::vec3(5.0f, 0.0f, 0.0f));
-    }
-    if (keys[SDL_SCANCODE_R]) {
-        for (auto& blob : gBlobs)
-            ApplyForce(blob.body, glm::vec3(-5.0f, 0.0f, -0.0f));
-    }
-    if (keys[SDL_SCANCODE_G]) {
-        for (auto& blob : gBlobs) {
-            if (blob.body.Grounded)
-                blob.body.velocity.y = 8.0f;
-        }
-    }
-
-    // Light movement
-    if (keys[SDL_SCANCODE_UP])    gLightPos.z -= 0.05f;
-    if (keys[SDL_SCANCODE_DOWN])  gLightPos.z += 0.05f;
-    if (keys[SDL_SCANCODE_LEFT])  gLightPos.x -= 0.05f;
-    if (keys[SDL_SCANCODE_RIGHT]) gLightPos.x += 0.05f;
-    if (keys[SDL_SCANCODE_Q])     gLightPos.y += 0.05f;
-    if (keys[SDL_SCANCODE_E])     gLightPos.y -= 0.05f;
 
     if (keys[SDL_SCANCODE_ESCAPE]) gQuit = true;
+
+    if (keys[SDL_SCANCODE_1]) gTimeScale = 1.0f;
+    if (keys[SDL_SCANCODE_2]) gTimeScale = 2.0f;
+    if (keys[SDL_SCANCODE_3]) gTimeScale = 3.0f;
+    if (keys[SDL_SCANCODE_4]) gTimeScale = 4.0f;
+    if (keys[SDL_SCANCODE_5]) gTimeScale = 5.0f;
+    if (keys[SDL_SCANCODE_6]) gTimeScale = 6.0f;
+    if (keys[SDL_SCANCODE_7]) gTimeScale = 7.0f;
+    if (keys[SDL_SCANCODE_8]) gTimeScale = 8.0f;
+    if (keys[SDL_SCANCODE_9]) gTimeScale = 9.0f;
+    if (keys[SDL_SCANCODE_0]) gTimeScale = 20.0f;
 }
 
 void PreDraw() {
     glEnable(GL_DEPTH_TEST);
     glDisable(GL_CULL_FACE);
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-
 }
 
 void DrawMesh(GLuint vao, GLsizei indexCount,
               const glm::mat4& model, const glm::mat4& view, const glm::mat4& proj) {
-
     glUniformMatrix4fv(glGetUniformLocation(gShaderProgram, "uModel"),
                        1, GL_FALSE, glm::value_ptr(model));
     glUniformMatrix4fv(glGetUniformLocation(gShaderProgram, "uView"),
@@ -426,129 +395,12 @@ void DrawMesh(GLuint vao, GLsizei indexCount,
     glDrawElements(GL_TRIANGLES, indexCount, GL_UNSIGNED_INT, 0);
 }
 
-void UpdateAI(float dt) {
-    for (auto& blob : gBlobs) {
-        if (!blob.alive) continue;
-
-        // Drain energy while moving
-        glm::vec3 hVel = glm::vec3(blob.body.velocity.x, 0.0f, blob.body.velocity.z);
-        if (glm::length(hVel) > 0.1f)
-            blob.energy -= blob.phenotype.energyCost * dt;
-
-        // Die if out of energy
-        if (blob.energy <= 0.0f) {
-            blob.alive = false;
-            continue;
-        }
-
-        blob.wanderTimer -= dt;
-        if (blob.wanderTimer <= 0.0f) {
-            float angle      = (rand() % 360) * (3.14159f / 180.0f);
-            blob.wanderDir   = glm::vec3(cos(angle), 0.0f, sin(angle));
-            blob.wanderTimer = 2.0f + (rand() % 200) * 0.01f;
-        }
-
-        if (blob.body.Grounded) {
-            // Use phenotype speed for force
-            ApplyForce(blob.body, blob.wanderDir * blob.phenotype.moveForce);
-
-            if (rand() % 100 < 2)
-                blob.body.velocity.y = 5.0f;
-        }
-
-        // Boundary push
-        float dist = glm::length(glm::vec2(blob.body.position.x, blob.body.position.z));
-        if (dist > 15.0f) {
-            glm::vec3 toCenter = glm::normalize(glm::vec3(-blob.body.position.x, 0.0f, -blob.body.position.z));
-            ApplyForce(blob.body, toCenter * 3.0f);
-            blob.wanderDir = toCenter;
-        }
-    }
-}
-
-void DrawBlobUI() {
-    // Start ImGui frame
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplSDL3_NewFrame();
-    ImGui::NewFrame();
-
-    // Always-visible population stats in corner
-    ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(220, 80), ImGuiCond_Always);
-    ImGui::Begin("Population", nullptr,
-                 ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-
-    int alive = 0;
-    for (auto& b : gBlobs) if (b.alive) alive++;
-    ImGui::Text("Alive: %d / %d", alive, BLOB_COUNT);
-    ImGui::Text("Light: (%.1f, %.1f, %.1f)",
-                gLightPos.x, gLightPos.y, gLightPos.z);
-    ImGui::End();
-
-    // Selected blob stats panel
-    if (gSelectedBlob != -1 && gBlobs[gSelectedBlob].alive) {
-        const BlobInstance& blob = gBlobs[gSelectedBlob];
-        const Genome&       g    = blob.genome;
-        const Phenotype&    p    = blob.phenotype;
-
-        ImGui::SetNextWindowPos(ImVec2(10, 100), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(280, 280), ImGuiCond_Always);
-        ImGui::Begin("Selected Blob", nullptr,
-                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-
-        ImGui::Text("Blob #%d", gSelectedBlob);
-        ImGui::Separator();
-
-        // Color swatch
-        ImGui::ColorButton("Color##blob",
-            ImVec4(p.color.r, p.color.g, p.color.b, 1.0f),
-            0, ImVec2(260, 20));
-
-        ImGui::Separator();
-        ImGui::Text("--- Genome ---");
-        ImGui::SliderFloat("Size",       (float*)&g.size,       0.0f, 1.0f);
-        ImGui::SliderFloat("Speed",      (float*)&g.speed,      0.0f, 1.0f);
-        ImGui::SliderFloat("Sight",      (float*)&g.sightRange, 0.0f, 1.0f);
-        ImGui::SliderFloat("Energy Eff", (float*)&g.energyEff,  0.0f, 1.0f);
-
-        ImGui::Separator();
-        ImGui::Text("--- Phenotype ---");
-        ImGui::Text("World Scale:  %.3f", p.worldScale);
-        ImGui::Text("Move Force:   %.3f", p.moveForce);
-        ImGui::Text("Sight Dist:   %.3f", p.sightDist);
-        ImGui::Text("Energy Cost:  %.3f", p.energyCost);
-
-        ImGui::Separator();
-        ImGui::Text("--- Runtime ---");
-        float energyPct = blob.energy / p.maxEnergy;
-        ImGui::ProgressBar(energyPct, ImVec2(-1, 0), "Energy");
-        ImGui::Text("%.1f / %.1f", blob.energy, p.maxEnergy);
-        ImGui::Text("Grounded: %s", blob.body.Grounded ? "Yes" : "No");
-        ImGui::Text("Velocity: (%.2f, %.2f, %.2f)",
-                    blob.body.velocity.x,
-                    blob.body.velocity.y,
-                    blob.body.velocity.z);
-
-        ImGui::End();
-    } else {
-        ImGui::SetNextWindowPos(ImVec2(10, 100), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(280, 40), ImGuiCond_Always);
-        ImGui::Begin("Selected Blob", nullptr,
-                     ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove);
-        ImGui::Text("Click a blob to inspect it");
-        ImGui::End();
-    }
-
-    // Render
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-}
-
 void Draw() {
 
-    UpdateAI(gDeltaTime);
+    UpdateAI(gDeltaTime, gBlobs);
 
-    // Update physics and build matrices for all blobs
+    UpdateFood(gDeltaTime);
+
     for (auto& blob : gBlobs) {
         if (!blob.alive) continue;
 
@@ -557,36 +409,35 @@ void Draw() {
         blob.modelMatrix = glm::mat4(1.0f);
         blob.modelMatrix = glm::translate(blob.modelMatrix,
             glm::vec3(blob.body.position.x,
-                    blob.body.position.y - blob.body.radius - (gObjectBottomOffset * blob.phenotype.worldScale),
-                    blob.body.position.z));
+                      blob.body.position.y - blob.body.radius - (gObjectBottomOffset * blob.phenotype.worldScale),
+                      blob.body.position.z));
 
-        // Rotate to face movement direction
         glm::vec3 horizontalVel = glm::vec3(blob.body.velocity.x, 0.0f, blob.body.velocity.z);
         if (glm::length(horizontalVel) > 0.1f) {
             glm::vec3 forward = glm::normalize(horizontalVel);
-            float angle = atan2(forward.x, forward.z);
+            float angle = atan2(forward.x, forward.z) - glm::radians(90.0f);
             blob.modelMatrix = glm::rotate(blob.modelMatrix, angle, glm::vec3(0.0f, 1.0f, 0.0f));
         }
 
-        // Use phenotype scale instead of gObjectScale
         blob.modelMatrix = glm::scale(blob.modelMatrix, glm::vec3(blob.phenotype.worldScale));
     }
 
-    // Build view/proj matrices
-    glm::mat4 view = GetViewMatrix();
-    glm::mat4 proj = glm::perspective(glm::radians(45.0f),
-                                      (float)gScreenWidth / gScreenHeight,
-                                      0.1f, 100.0f);
+    for (int i = 0; i < (int)gBlobs.size(); i++) {
+        if (!gBlobs[i].alive) continue;
+        for (int j = i + 1; j < (int)gBlobs.size(); j++) {
+            if (!gBlobs[j].alive) continue;
+            ResolveSphereCollision(gBlobs[i].body, gBlobs[j].body);
+        }
+    }
 
     glm::mat4 planeModel = glm::mat4(1.0f);
 
-    // Light space matrix
     glm::mat4 lightProj  = glm::ortho(-25.0f, 25.0f, -25.0f, 25.0f, 0.1f, 200.0f);
     glm::mat4 lightView  = glm::lookAt(gLightPos,
                                        glm::vec3(0.0f, 0.0f, 0.0f),
                                        glm::vec3(0.0f, 1.0f, 0.0f));
     glm::mat4 lightSpace = lightProj * lightView;
-
+    
     // ----- PASS 1: Shadow Map -----
     glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
     glBindFramebuffer(GL_FRAMEBUFFER, gShadowMapFBO);
@@ -599,13 +450,12 @@ void Draw() {
     glUniformMatrix4fv(glGetUniformLocation(gShadowShaderProgram, "uLightSpaceMatrix"),
                        1, GL_FALSE, glm::value_ptr(lightSpace));
 
-    // Plane shadow
     glUniformMatrix4fv(glGetUniformLocation(gShadowShaderProgram, "uModel"),
                        1, GL_FALSE, glm::value_ptr(planeModel));
     glBindVertexArray(gPlaneVAO);
     glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
-    // Blob shadows
+    
     for (auto& blob : gBlobs) {
         if (!blob.alive) continue;
         glUniformMatrix4fv(glGetUniformLocation(gShadowShaderProgram, "uModel"),
@@ -613,6 +463,20 @@ void Draw() {
         glBindVertexArray(gObjectMesh.VAO);
         glDrawElements(GL_TRIANGLES, (GLsizei)gObjectMesh.indices.size(), GL_UNSIGNED_INT, 0);
     }
+
+    for (auto& food : gFood) {
+        if (!food.active) continue;
+
+        glm::mat4 foodModel = glm::mat4(1.0f);
+        foodModel = glm::translate(foodModel, food.position);
+        foodModel = glm::scale(foodModel, glm::vec3(0.1f)); // adjust scale to taste
+
+        glUniformMatrix4fv(glGetUniformLocation(gShadowShaderProgram, "uModel"),
+                        1, GL_FALSE, glm::value_ptr(foodModel));
+        glBindVertexArray(gFoodMesh.VAO);
+        glDrawElements(GL_TRIANGLES, (GLsizei)gFoodMesh.indices.size(), GL_UNSIGNED_INT, 0);
+    }
+
 
     glCullFace(GL_BACK);
     glDisable(GL_CULL_FACE);
@@ -628,40 +492,93 @@ void Draw() {
     glUniformMatrix4fv(glGetUniformLocation(gShaderProgram, "uLightSpaceMatrix"),
                        1, GL_FALSE, glm::value_ptr(lightSpace));
 
-    // Bind shadow map to texture unit 1
     glActiveTexture(GL_TEXTURE1);
     glBindTexture(GL_TEXTURE_2D, gShadowMapTexture);
     glUniform1i(glGetUniformLocation(gShaderProgram, "uShadowMap"), 1);
 
-    // Draw plane
     glUniform3f(glGetUniformLocation(gShaderProgram, "uObjectColor"), 0.4f, 0.7f, 0.4f);
-    DrawMesh(gPlaneVAO, 6, planeModel, view, proj);
+    DrawMesh(gPlaneVAO, 6, planeModel, gView, gProj);
 
-    // Draw blobs with per-blob phenotype color
     for (auto& blob : gBlobs) {
         if (!blob.alive) continue;
+
+        // Tick down the flash timer
+        if (blob.hitFlashTimer > 0.0f)
+            blob.hitFlashTimer -= gDeltaTime;
+
+        // Use flash color if active, otherwise normal phenotype color
+        glm::vec3 renderColor = (blob.hitFlashTimer > 0.0f)
+            ? glm::vec3(1.0f, 0.0f, 0.0f)
+            : blob.phenotype.color;
+
         glUniform3f(glGetUniformLocation(gShaderProgram, "uObjectColor"),
-                    blob.phenotype.color.r,
-                    blob.phenotype.color.g,
-                    blob.phenotype.color.b);
+                    renderColor.r, renderColor.g, renderColor.b);
+
         DrawMesh(gObjectMesh.VAO, (GLsizei)gObjectMesh.indices.size(),
-                 blob.modelMatrix, view, proj);
+                blob.modelMatrix, gView, gProj);
+    }
+
+    glUniform3f(glGetUniformLocation(gShaderProgram, "uObjectColor"), 0.0f, 1.0f, 0.3f);
+    for (auto& food : gFood) {
+        if (!food.active) continue;
+
+        glm::mat4 foodModel = glm::mat4(1.0f);
+        foodModel = glm::translate(foodModel, food.position);
+        foodModel = glm::scale(foodModel, glm::vec3(0.05f)); // adjust scale to taste
+
+        DrawMesh(gFoodMesh.VAO, (GLsizei)gFoodMesh.indices.size(),
+                foodModel, gView, gProj);
     }
 
     glUseProgram(0);
 }
 
 void MainLoop() {
+
     while (!gQuit) {
+        
         float currentTime = (float)SDL_GetTicks() / 1000.0f;
         gDeltaTime = currentTime - gLastTime;
         gLastTime  = currentTime;
         if (gDeltaTime > 0.05f) gDeltaTime = 0.05f;
 
+        gDeltaTime *= gTimeScale;
+
+        gView = GetViewMatrix();
+        gProj = glm::perspective(glm::radians(45.0f),
+                                 (float)gScreenWidth / gScreenHeight,
+                                 0.1f, 500.0f);
+
         Input();
         PreDraw();
-        Draw();
-        DrawBlobUI();
+
+        if (!gShowTitleScreen) {
+            Draw();
+
+            gGeneration.timer += gDeltaTime;
+            if (gGeneration.timer >= gGeneration.duration) {
+                float meshRadius  = gObjectMesh.GetBoundingRadius();
+                float worldRadius = meshRadius * gObjectScale;
+                EvolveGeneration(gBlobs, BLOB_COUNT, worldRadius, gObjectScale);
+                gSelectedBlob = -1;
+            }
+        } else {
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
+
+        if (gFollowSelectedBlob) {
+            if (gSelectedBlob != -1 && gSelectedBlob < (int)gBlobs.size() && gBlobs[gSelectedBlob].alive) {
+                glm::vec3 desiredTarget = gBlobs[gSelectedBlob].body.position;
+                gCameraTarget = glm::mix(gCameraTarget, desiredTarget, 0.08f);
+                UpdateOrbitCamera();
+            } else {
+                gFollowSelectedBlob = false;
+            }
+        }
+
+        DrawBlobUI(gBlobs, gSelectedBlob, BLOB_COUNT,
+                   gScreenWidth, gScreenHeight,
+                   gView, gProj, gObjectBottomOffset);
         SDL_GL_SwapWindow(gGraphisApplicationWindow);
     }
 }
@@ -675,13 +592,13 @@ void CleanUp() {
     glDeleteBuffers(1, &gObjectMesh.VBO);
     glDeleteBuffers(1, &gObjectMesh.EBO);
 
-    // Clean up shadow map resources
-    glDeleteFramebuffers(1, &gShadowMapFBO);      
-    glDeleteTextures(1, &gShadowMapTexture);        
+    glDeleteFramebuffers(1, &gShadowMapFBO);
+    glDeleteTextures(1, &gShadowMapTexture);
 
     glDeleteProgram(gShaderProgram);
-    glDeleteProgram(gShadowShaderProgram);         
+    glDeleteProgram(gShadowShaderProgram);
 
+    ShutdownUIPreviewResources();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
@@ -691,9 +608,13 @@ void CleanUp() {
 }
 
 int main(int argc, char* args[]) {
+    std::cout << "Starting..." << std::endl;
     InitializeProgram();
+    std::cout << "Program initialized" << std::endl;
     VertexSpecification();
+    std::cout << "Vertices specified" << std::endl;
     CreateGraphicsPipeline();
+    std::cout << "Pipeline created" << std::endl;
     MainLoop();
     CleanUp();
     return 0;

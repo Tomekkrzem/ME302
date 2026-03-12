@@ -5,9 +5,9 @@
 
 const float GRAVITY         = -9.8f;
 const float GROUND_Y        =  0.0f;
-const float RESTITUTION     =  0.4f;
+const float RESTITUTION     =  0.1f;
 const float FRICTION        =  0.98f;
-
+const float GROUND_SLOP  = 0.01f;  
 // --------------------- Rigid Body ---------------------
 
 struct RigidBody {
